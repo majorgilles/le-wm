@@ -20,6 +20,27 @@ dependencies = [
     # stable-pretraining wants datasets>=2.20, but without naming it directly the
     # resolver backsolves to 1.1.1, which crashes on modern pyarrow.
     "datasets>=2.20.0",
+    # Notebooks under nbs/ are the source of truth; nbdev exports them to lewm/.
+    "nbdev",
+    "jupyterlab",
+    "ipywidgets",
+    # Figures, training curves and rollout videos in the tutorial notebook.
+    "matplotlib",
+    "imageio[ffmpeg]",
+    # Reading the HuggingFace pusht_expert_train.h5.zst release directly.
+    "h5py",
+    "zstandard",
+    # The pusht .h5 stores pixels with the Blosc filter (HDF5 id 32001); h5py
+    # cannot decode those chunks unless this plugin is installed to register it.
+    "hdf5plugin",
+]
+
+[dependency-groups]
+# Development tooling, installed by `uv sync` but not part of the runtime deps.
+# ty is Astral's type checker (same family as uv and ruff). It is pre-1.0, so
+# it is pinned loosely and treated as advisory rather than a build gate.
+dev = [
+    "ty",
 ]
 
 [tool.uv]
@@ -54,3 +75,62 @@ torch = [
 torchvision = [
     { index = "pytorch-cu130", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
 ]
+
+
+# ---------------------------------------------------------------------------
+# nbdev: notebooks are the source of truth for the model code.
+#
+#   nbs/00_module.ipynb -> lewm/module.py
+#   nbs/01_jepa.ipynb   -> lewm/jepa.py
+#   nbs/02_utils.ipynb  -> lewm/utils.py
+#
+# Edit the notebook, then run `uv run nbdev-export` to regenerate the .py file.
+# Do not edit the files under lewm/ directly; the export overwrites them.
+#
+# Import exported code through the lewm package; there are no duplicate root
+# modules.
+#
+# lib_path must point at a real package directory: nbdev walks it to add
+# __init__.py files, and pointing it at the repo root makes it walk .venv too.
+#
+# train.py and eval.py stay hand-written scripts: both use @hydra.main, which
+# needs a real command line and does not work from inside a notebook cell.
+# ---------------------------------------------------------------------------
+[tool.nbdev]
+lib_path = "lewm"
+nbs_path = "nbs"
+doc_path = "_docs"
+recursive = true
+tst_flags = "notest"
+put_version_in_init = false
+update_pyproject = false
+
+
+# ---------------------------------------------------------------------------
+# ty: Astral's type checker (same family as uv). Run it with:
+#
+#     uv run ty check --exit-zero-on-warning
+#
+# It is checked in as advisory tooling, not a build gate: ty is pre-1.0 and
+# most of this codebase's surface is PyTorch, Hydra and OmegaConf, whose public
+# APIs are only partly typed.
+#
+# Two classes of diagnostic here are known false positives and are downgraded
+# below rather than worked around in the code:
+#
+#  - `nn.Sequential[-1].weight` -- __getitem__ is typed as returning Module, so
+#    ty cannot see that the last element is a Linear. The AdaLN-zero init in
+#    lewm/module.py is correct.
+#  - `OmegaConf.to_container()` returns a broad union, so every downstream use
+#    looks like a type error. Hydra configs are validated at runtime instead.
+# ---------------------------------------------------------------------------
+[tool.ty.src]
+include = ["lewm", "train.py", "eval.py"]
+exclude = ["nbs", "_docs", ".venv"]
+
+[tool.ty.rules]
+# See the note above: these fire almost exclusively on untyped third-party
+# surface, so they are warnings rather than errors.
+invalid-argument-type = "warn"
+unresolved-attribute = "warn"
+possibly-missing-attribute = "warn"

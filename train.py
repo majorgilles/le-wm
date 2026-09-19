@@ -1,6 +1,7 @@
 import os
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import hydra
 import lightning as pl
@@ -8,14 +9,19 @@ import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from omegaconf import OmegaConf, open_dict
+from omegaconf import DictConfig, OmegaConf, open_dict
 
-from module import SIGReg
-from utils import get_column_normalizer, get_img_preprocessor, SaveCkptCallback
+from lewm.module import SIGReg
+from lewm.utils import SaveCkptCallback, get_column_normalizer, get_img_preprocessor
 
 
-def lejepa_forward(self, batch, stage, cfg):
-    """encode observations, predict next states, compute losses."""
+def lejepa_forward(
+    self: Any,
+    batch: dict[str, torch.Tensor],
+    stage: str,
+    cfg: DictConfig,
+) -> dict[str, torch.Tensor]:
+    """Encode observations, predict next states, and compute losses."""
 
     ctx_len = cfg.history_size
     n_preds = cfg.num_preds
@@ -30,34 +36,44 @@ def lejepa_forward(self, batch, stage, cfg):
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
-    ctx_act = act_emb[:, : ctx_len]
+    ctx_act = act_emb[:, :ctx_len]
 
-    tgt_emb = emb[:, n_preds:] # label
-    pred_emb = self.model.predict(ctx_emb, ctx_act) # pred
+    tgt_emb = emb[:, n_preds:]  # label
+    pred_emb = self.model.predict(ctx_emb, ctx_act)  # prediction
 
     # LeWM loss
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
-    output["sigreg_loss"]= self.sigreg(emb.transpose(0, 1))
-    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]  
+    output["sigreg_loss"] = self.sigreg(emb.transpose(0, 1))
+    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]
 
-    losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
+    losses_dict = {
+        f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k
+    }
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
     return output
 
+
 @hydra.main(version_base=None, config_path="./config/train", config_name="lewm")
-def run(cfg):
+def run(cfg: DictConfig) -> None:
     #########################
     ##       dataset       ##
     #########################
 
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
-    dataset_name = dataset_cfg.pop("name")
-    cache_dir = os.environ.get("LOCAL_DATASET_DIR", None)
-    dataset = swm.data.load_dataset(
-        dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
+    if not isinstance(dataset_cfg, dict):
+        raise TypeError("data.dataset must be a mapping")
+    dataset_name = str(dataset_cfg.pop("name"))
+    dataset_kwargs = {str(key): value for key, value in dataset_cfg.items()}
+    dataset_dir = Path(
+        os.environ.get("LOCAL_DATASET_DIR") or swm.data.utils.get_cache_dir()
     )
-    transforms = [get_img_preprocessor(source='pixels', target='pixels', img_size=cfg.img_size)]
-    
+    dataset = swm.data.load_dataset(
+        str(dataset_dir / dataset_name), transform=None, **dataset_kwargs
+    )
+    transforms = [
+        get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)
+    ]
+
     with open_dict(cfg):
         for col in cfg.data.dataset.keys_to_load:
             if col.startswith("pixels"):
@@ -65,7 +81,9 @@ def run(cfg):
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
-        cfg.model.action_encoder.input_dim = cfg.data.dataset.frameskip * dataset.get_dim("action")
+        cfg.model.action_encoder.input_dim = (
+            cfg.data.dataset.frameskip * dataset.get_dim("action")
+        )
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform

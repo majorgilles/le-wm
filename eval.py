@@ -4,6 +4,7 @@ os.environ["MUJOCO_GL"] = "egl"
 
 import time
 from pathlib import Path
+from typing import Any
 
 import hydra
 import numpy as np
@@ -14,7 +15,7 @@ from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
 
-def img_transform(cfg):
+def img_transform(cfg: DictConfig) -> transforms.Compose:
     transform = transforms.Compose(
         [
             transforms.ToImage(),
@@ -26,7 +27,7 @@ def img_transform(cfg):
     return transform
 
 
-def get_episodes_length(dataset, episodes):
+def get_episodes_length(dataset: Any, episodes: np.ndarray) -> np.ndarray:
     col_name = "episode_idx" if "episode_idx" in dataset.column_names else "ep_idx"
 
     episode_idx = dataset.get_col_data(col_name)
@@ -37,18 +38,17 @@ def get_episodes_length(dataset, episodes):
     return np.array(lengths)
 
 
-def get_dataset(cfg, dataset_name):
-    dataset_path = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
-    dataset = swm.data.HDF5Dataset(
-        dataset_name,
+def get_dataset(cfg: DictConfig, dataset_name: str) -> Any:
+    dataset_dir = Path(cfg.cache_dir or swm.data.utils.get_cache_dir())
+    return swm.data.load_dataset(
+        str(dataset_dir / f"{dataset_name}.h5"),
         keys_to_cache=cfg.dataset.keys_to_cache,
-        cache_dir=dataset_path,
     )
-    return dataset
+
 
 @hydra.main(version_base=None, config_path="./config/eval", config_name="pusht")
 def run(cfg: DictConfig):
-    """Run evaluation of dinowm vs random policy."""
+    """Evaluate a random or world-model policy."""
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget
     ), "Planning horizon must be smaller than or equal to eval_budget"

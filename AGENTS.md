@@ -1,94 +1,89 @@
 # AGENTS.md
 
-Notes for agents and humans working on this repo.
+## Work in WSL
 
-## Environment: WSL, not Windows
+This working tree is `~/dev/le-wm` inside WSL. The checkout under
+`C:\Users\giloz\dev\le-wm` is obsolete. Keep the repo and `$STABLEWM_HOME` on
+the WSL filesystem: training reads a large HDF5 file with six data-loader
+workers, and `/mnt/c` is much slower.
 
-**This project lives in WSL at `~/dev/le-wm` and should be worked on there.**
-A copy may still exist at `C:\Users\giloz\dev\le-wm`; that is the older Windows
-checkout and is no longer the working tree.
+SSH pushes currently fail because `~/.ssh/id_ed25519` is not registered with
+the GitHub account.
 
-Keep the repo and `$STABLEWM_HOME` on the WSL filesystem, under `~`. Do not move
-either onto `/mnt/c`. Crossing the Windows filesystem boundary is slow, and
-training reads HDF5 datasets per batch with 6 dataloader workers
-(see `config/train/lewm.yaml`), so the penalty is real.
+## Commands
 
-## Packaging: uv
+```bash
+uv sync
+uv run nbdev-export
+./tools/run_nbs.sh 00_module 01_jepa 02_utils
+uv run ty check --exit-zero-on-warning
+uv run python train.py data=pusht
+uv run python eval.py --config-name=pusht.yaml policy=random
+```
 
-Dependencies are managed with uv. Both `pyproject.toml` and `uv.lock` are committed.
+`ty` is advisory because PyTorch, Hydra, and OmegaConf expose partly untyped
+APIs. Investigate warnings that identify a real missing API; do not add casts
+only to silence third-party typing gaps.
 
-    uv sync                           # create or refresh the environment
-    uv run python train.py data=pusht
+## Source of truth
 
-`package = false` is set because the scripts are flat files at the repo root,
-not an installable package.
+The notebooks are canonical and nbdev exports model code:
 
-`train.py` and `eval.py` are Hydra entry points using `@hydra.main`, which needs
-a real command line. They are run as scripts, never imported.
+- `nbs/00_module.ipynb` → `lewm/module.py`
+- `nbs/01_jepa.ipynb` → `lewm/jepa.py`
+- `nbs/02_utils.ipynb` → `lewm/utils.py`
+- `nbs/03_tutorial_pusht.ipynb` is the end-to-end tutorial and is not exported
 
-## Dependency pins, and why
+Edit notebooks, then run `uv run nbdev-export`. Treat `lewm/*.py` and
+`lewm/_modidx.py` as generated files. `lib_path` must stay `lewm`; setting it
+to `.` makes nbdev walk `.venv` and create `__init__.py` files in installed
+packages.
 
-Each of these is also commented in `pyproject.toml`. Do not remove one without
-re-checking that the reason still holds.
+`train.py` and `eval.py` remain scripts because their `@hydra.main` entry
+points require a real command line. Import model code as `lewm.*`; duplicate
+root modules are intentionally absent.
 
-- **`box2d-py` overridden off every platform.** It ships no wheel for Python
-  3.10 on any platform, so it builds from source and needs the SWIG binary. It
-  arrives through `gymnasium[all]` inside `stable-worldmodel[env]`, but the only
-  environments used here are PushT, Reacher, Cube and TwoRoom, none of them
-  Box2D. Drop the override if a Box2D environment is ever added.
-- **`datasets>=2.20.0` named explicitly.** `stable-pretraining` requires it, but
-  without a direct dependency the resolver backsolved to version 1.1.1, which
-  crashes on modern pyarrow because `pa.PyExtensionType` was removed.
-- **`environments` restricted to win32, linux and darwin.** Otherwise uv also
-  solves for Pyodide and emscripten, which is what allowed `datasets` to fall
-  back to 1.1.1.
-- **torch and torchvision from the cu130 index.** The default PyPI wheels are
-  CPU-only. The cu130 build matches the local driver, CUDA 13.4, on an
-  RTX 4070 SUPER. macOS has no CUDA and stays on the PyPI wheels.
+Notebook outputs are committed so GitHub readers can see the checks and figures
+without a local GPU. Preserve existing outputs; do not install an output-cleaning
+hook. Notebook execution and refreshed outputs are user-run.
 
-## Verified working in WSL
+## Data and checkpoints
 
-    torch 2.14.0+cu130
-    RTX 4070 SUPER, compute capability (8, 9)
-    torch.cuda.is_available() -> True, GPU matmul OK
-    triton 3.8.0
-    all project modules import
+`$STABLEWM_HOME` defaults to `~/.stable_worldmodel`. PushT training and the
+tutorial read `$STABLEWM_HOME/pusht_expert_train.h5` directly through
+stable-worldmodel's format registry. `LOCAL_DATASET_DIR` can override the
+training dataset directory.
 
-`triton` has a Linux wheel but none for Windows, so `torch.compile` is available
-here and was not on the Windows checkout.
+The Hugging Face checkpoint predates Transformers 5. Its ViT keys must be
+remapped before strict loading. Keep the working conversion in `README.md` and
+the tutorial aligned.
 
-## History of this setup
+## Dependency constraints
 
-What was asked, in order, and what came of it:
+Dependencies use uv; commit both `pyproject.toml` and `uv.lock` when they
+change. Keep these constraints unless their original problem has been
+re-tested:
 
-1. **"convert this to a uv project"** - the repo had no packaging files at all.
-   Added `pyproject.toml` and `uv.lock`, with dependencies inferred from the
-   imports in the five scripts. Replaced the README's manual venv and pip steps
-   with `uv sync`, and prefixed the documented run commands with `uv run`.
-2. **`uv sync` failed on Windows** - four resolution problems surfaced in
-   sequence: the lancedb Windows wheel, the box2d-py SWIG build, the datasets
-   backsolve, and a CPU-only torch. Each is recorded above.
-3. **"convert all code to jupyter notebooks and use nbdev"** - raised, not done.
-   See the open item below.
-4. **"i need to use cuda"** - torch had resolved to a CPU-only build. Pointed
-   torch and torchvision at the cu130 PyTorch index and verified with a real GPU
-   matmul rather than just the availability flag.
-5. **"i should use WSL?"** - assessed. CUDA already worked natively, so WSL was
-   not needed for that. The actual wins were wheel availability, triton, and
-   forked rather than spawned dataloader workers.
-6. **"move this project to wsl under ~/dev"** - committed the uv work, cloned
-   from the Windows checkout into `~/dev/le-wm` preserving history, restored the
-   GitHub remote, removed the Windows-only workarounds, then relocked and
-   verified.
+- `box2d-py` is disabled because the used environments do not need Box2D and
+  Python 3.10 has no wheel.
+- `datasets>=2.20.0` prevents an incompatible backsolve to 1.1.1.
+- uv resolves only win32, Linux, and Darwin to avoid Pyodide backsolves.
+- Linux and Windows use PyTorch's cu130 index; macOS uses PyPI CPU wheels.
 
-## Open item
+Verified in WSL: PyTorch 2.14.0+cu130, Triton 3.8.0, and CUDA on an RTX 4070
+SUPER.
 
-Converting the code to Jupyter notebooks with nbdev was requested but not done.
-The blocker is that `train.py` and `eval.py` use `@hydra.main`, which does not
-work inside a notebook cell. The suggested scope was to convert only `jepa.py`,
-`module.py` and `utils.py`, which are pure definitions and a clean nbdev fit,
-and to leave the two Hydra entry points as scripts. Not yet decided.
+## Verification
 
-Note that SSH to GitHub does not currently work from WSL. The key at
-`~/.ssh/id_ed25519` is not registered with the account, so `git push` will fail
-until a key is added.
+Notebook execution is user-run: do not execute notebooks or start GPU training
+unless the user explicitly asks. After model or notebook changes:
+
+1. Export with `uv run nbdev-export` only when the user permits command execution.
+2. Ask the user to execute the affected notebook with `./tools/run_nbs.sh <name>`.
+3. Run `uv run ty check --exit-zero-on-warning` only when permitted; inspect every warning.
+4. Confirm a second export produces no diff when command execution is permitted.
+
+The full tutorial needs the 46 GB PushT dataset and pretrained checkpoint. With
+`RUN_TRAINING = False`, its expected planning result is expert rank `1/64` for
+a reachable goal and about `4/64` for a goal beyond the horizon. Real training
+is deliberately opt-in.
