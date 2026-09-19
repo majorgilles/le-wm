@@ -6,13 +6,20 @@
 __all__ = ['get_img_preprocessor', 'ZScoreNormalizer', 'get_column_normalizer', 'SaveCkptCallback']
 
 # %% ../nbs/02_utils.ipynb #a21ac7ad
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import torch
-from stable_pretraining import data as dt
+from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+from omegaconf import DictConfig
+from stable_pretraining import data as dt
 
 # %% ../nbs/02_utils.ipynb #6872de8a
-def get_img_preprocessor(source: str, target: str, img_size: int = 224):
+def get_img_preprocessor(
+    source: str, target: str, img_size: int = 224
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Build the pixel transform: uint8 image -> normalised, resized float tensor.
 
     source / target: the dict keys to read from and write to, e.g. "pixels".
@@ -31,15 +38,17 @@ class ZScoreNormalizer:
     tries to send it to a worker process.
     """
 
-    def __init__(self, mean, std):
+    def __init__(self, mean: torch.Tensor, std: torch.Tensor) -> None:
         self.mean = mean
         self.std = std
 
-    def __call__(self, x):
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return ((x - self.mean) / self.std).float()
 
 # %% ../nbs/02_utils.ipynb #76c37f94
-def get_column_normalizer(dataset, source: str, target: str):
+def get_column_normalizer(
+    dataset: Any, source: str, target: str
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Get normalizer for a specific column in the dataset.
 
     Computes mean and std over the entire column once, ignoring NaN rows,
@@ -67,13 +76,17 @@ class SaveCkptCallback(Callback):
         epoch_interval: save every N epochs.
     """
 
-    def __init__(self, run_name, cfg, epoch_interval: int = 1):
+    def __init__(
+        self, run_name: str, cfg: DictConfig, epoch_interval: int = 1
+    ) -> None:
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
         self.epoch_interval = epoch_interval
 
-    def on_train_epoch_end(self, trainer, pl_module):
+    def on_train_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
         super().on_train_epoch_end(trainer, pl_module)
 
         # Multi-GPU: every rank runs this callback, but only rank 0 writes.
@@ -85,7 +98,7 @@ class SaveCkptCallback(Callback):
             if (trainer.current_epoch + 1) == trainer.max_epochs:
                 self._save(pl_module.model, trainer.current_epoch + 1)
 
-    def _save(self, model, epoch):
+    def _save(self, model: torch.nn.Module, epoch: int) -> None:
         # Imported here rather than at module level: defers the cost and
         # avoids a circular import.
         from stable_worldmodel.wm.utils import save_pretrained

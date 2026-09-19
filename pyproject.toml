@@ -115,14 +115,9 @@ update_pyproject = false
 # most of this codebase's surface is PyTorch, Hydra and OmegaConf, whose public
 # APIs are only partly typed.
 #
-# Two classes of diagnostic here are known false positives and are downgraded
-# below rather than worked around in the code:
-#
-#  - `nn.Sequential[-1].weight` -- __getitem__ is typed as returning Module, so
-#    ty cannot see that the last element is a Linear. The AdaLN-zero init in
-#    lewm/module.py is correct.
-#  - `OmegaConf.to_container()` returns a broad union, so every downstream use
-#    looks like a type error. Hydra configs are validated at runtime instead.
+# OmegaConf and several training dependencies expose broad or incomplete types.
+# Diagnostics at those third-party boundaries remain warnings; project-owned
+# functions and methods are explicitly annotated.
 # ---------------------------------------------------------------------------
 [tool.ty.src]
 include = ["lewm", "train.py", "eval.py"]

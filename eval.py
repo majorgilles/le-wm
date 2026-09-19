@@ -47,7 +47,7 @@ def get_dataset(cfg: DictConfig, dataset_name: str) -> Any:
 
 
 @hydra.main(version_base=None, config_path="./config/eval", config_name="pusht")
-def run(cfg: DictConfig):
+def run(cfg: DictConfig) -> None:
     """Evaluate a random or world-model policy."""
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget
@@ -68,7 +68,7 @@ def run(cfg: DictConfig):
     col_name = "episode_idx" if "episode_idx" in dataset.column_names else "ep_idx"
     ep_indices, _ = np.unique(stats_dataset.get_col_data(col_name), return_index=True)
 
-    process = {}
+    process: dict[str, preprocessing.StandardScaler] = {}
     for col in cfg.dataset.keys_to_cache:
         if col in ["pixels"]:
             continue
@@ -157,7 +157,7 @@ def run(cfg: DictConfig):
     results_path = results_path / cfg.output.filename
     results_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with results_path.open("a") as f:
+    with results_path.open("a", encoding="utf-8") as f:
         f.write("\n")  # separate from previous runs
 
         f.write("==== CONFIG ====\n")

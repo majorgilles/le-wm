@@ -14,9 +14,9 @@ from einops import rearrange
 from torch import nn
 
 # %% ../nbs/01_jepa.ipynb #b4ab4a61
-def detach_clone(v):
-    """Detached, independent copy of a tensor; anything else is returned as-is."""
-    return v.detach().clone() if torch.is_tensor(v) else v
+def detach_clone(v: torch.Tensor) -> torch.Tensor:
+    """Return a detached, independent copy of a tensor."""
+    return v.detach().clone()
 
 # %% ../nbs/01_jepa.ipynb #1450a997
 class JEPA(nn.Module):
@@ -32,12 +32,12 @@ class JEPA(nn.Module):
 
     def __init__(
         self,
-        encoder,
-        predictor,
-        action_encoder,
-        projector=None,
-        pred_proj=None,
-    ):
+        encoder: nn.Module,
+        predictor: nn.Module,
+        action_encoder: nn.Module,
+        projector: nn.Module | None = None,
+        pred_proj: nn.Module | None = None,
+    ) -> None:
         super().__init__()
 
         self.encoder = encoder
@@ -47,7 +47,9 @@ class JEPA(nn.Module):
         self.projector = projector or nn.Identity()
         self.pred_proj = pred_proj or nn.Identity()
 
-    def encode(self, info):
+    def encode(
+        self, info: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Encode observations and actions into embeddings.
         info: dict with pixels and action keys
 
@@ -82,7 +84,9 @@ class JEPA(nn.Module):
 
         return info
 
-    def predict(self, emb, act_emb):
+    def predict(
+        self, emb: torch.Tensor, act_emb: torch.Tensor
+    ) -> torch.Tensor:
         """Predict next state embedding
         emb: (B, T, D)
         act_emb: (B, T, A_emb)
@@ -100,7 +104,12 @@ class JEPA(nn.Module):
     ## Inference only ##
     ####################
 
-    def rollout(self, info, action_sequence, history_size: int = 3):
+    def rollout(
+        self,
+        info: dict[str, torch.Tensor],
+        action_sequence: torch.Tensor,
+        history_size: int = 3,
+    ) -> dict[str, torch.Tensor]:
         """Rollout the model given an initial info dict and action sequence.
         pixels: (B, S, T, C, H, W)
         action_sequence: (B, S, T, action_dim)
@@ -165,7 +174,7 @@ class JEPA(nn.Module):
 
         return info
 
-    def criterion(self, info_dict: dict):
+    def criterion(self, info_dict: dict[str, torch.Tensor]) -> torch.Tensor:
         """Compute the cost between predicted embeddings and goal embeddings.
 
         Only the FINAL step is scored: a plan is judged by where it ends up,
@@ -185,7 +194,11 @@ class JEPA(nn.Module):
 
         return cost
 
-    def get_cost(self, info_dict: dict, action_candidates: torch.Tensor):
+    def get_cost(
+        self,
+        info_dict: dict[str, torch.Tensor],
+        action_candidates: torch.Tensor,
+    ) -> torch.Tensor:
         """ Compute the cost of action candidates given an info dict with goal and initial state.
 
         This is the planning entry point. A planner (CEM, Adam, ...) proposes

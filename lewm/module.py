@@ -7,13 +7,17 @@ __all__ = ['modulate', 'SIGReg', 'FeedForward', 'Attention', 'ConditionalBlock',
            'ARPredictor']
 
 # %% ../nbs/00_module.ipynb #a31972c5
+from collections.abc import Callable
+
 import torch
 from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
 
 # %% ../nbs/00_module.ipynb #2bea1c2f
-def modulate(x, shift, scale):
+def modulate(
+    x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor
+) -> torch.Tensor:
     """AdaLN-zero modulation
 
     x, shift, scale: all broadcastable, typically (B, T, D).
@@ -37,7 +41,7 @@ class SIGReg(torch.nn.Module):
             projections means a lower-variance estimate at linear cost.
     """
 
-    def __init__(self, knots=17, num_proj=1024):
+    def __init__(self, knots: int = 17, num_proj: int = 1024) -> None:
         super().__init__()
         self.num_proj = num_proj
 
@@ -62,7 +66,7 @@ class SIGReg(torch.nn.Module):
         self.register_buffer("phi", window)
         self.register_buffer("weights", weights * window)
 
-    def forward(self, proj):
+    def forward(self, proj: torch.Tensor) -> torch.Tensor:
         """
         proj: (T, B, D)  -- note time first; train.py passes emb.transpose(0, 1)
         returns: scalar
@@ -95,7 +99,7 @@ class FeedForward(nn.Module):
     (B, T, dim) -> (B, T, dim), widening to hidden_dim in the middle.
     """
 
-    def __init__(self, dim, hidden_dim, dropout=0.0):
+    def __init__(self, dim: int, hidden_dim: int, dropout: float = 0.0) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.LayerNorm(dim),
@@ -106,14 +110,16 @@ class FeedForward(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 # %% ../nbs/00_module.ipynb #5121b995
 class Attention(nn.Module):
     """Scaled dot-product attention with causal masking"""
 
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
+    def __init__(
+        self, dim: int, heads: int = 8, dim_head: int = 64, dropout: float = 0.0
+    ) -> None:
         super().__init__()
         inner_dim = dim_head * heads
 
@@ -136,7 +142,7 @@ class Attention(nn.Module):
             else nn.Identity()
         )
 
-    def forward(self, x, causal=True):
+    def forward(self, x: torch.Tensor, causal: bool = True) -> torch.Tensor:
         """
         x : (B, T, D)  ->  (B, T, D)
 
@@ -163,7 +169,14 @@ class ConditionalBlock(nn.Module):
     (B, T, D) -- here, the encoded action.
     """
 
-    def __init__(self, dim, heads, dim_head, mlp_dim, dropout=0.0):
+    def __init__(
+        self,
+        dim: int,
+        heads: int,
+        dim_head: int,
+        mlp_dim: int,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
 
         self.attn = Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)
@@ -181,10 +194,12 @@ class ConditionalBlock(nn.Module):
         )
 
         # The "zero" of AdaLN-zero: start as the identity, learn to condition.
-        nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
+        last_layer = self.adaLN_modulation[-1]
+        assert isinstance(last_layer, nn.Linear)
+        nn.init.constant_(last_layer.weight, 0)
+        nn.init.constant_(last_layer.bias, 0)
 
-    def forward(self, x, c):
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
         # Six (B, T, D) vectors from one (B, T, 6D) projection.
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
             self.adaLN_modulation(c).chunk(6, dim=-1)
@@ -201,7 +216,14 @@ class Block(nn.Module):
     (B, T, D) -> (B, T, D). No conditioning: forward takes x only.
     """
 
-    def __init__(self, dim, heads, dim_head, mlp_dim, dropout=0.0):
+    def __init__(
+        self,
+        dim: int,
+        heads: int,
+        dim_head: int,
+        mlp_dim: int,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
 
         self.attn = Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)
@@ -209,7 +231,7 @@ class Block(nn.Module):
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
@@ -223,16 +245,16 @@ class Transformer(nn.Module):
 
     def __init__(
         self,
-        input_dim,
-        hidden_dim,
-        output_dim,
-        depth,
-        heads,
-        dim_head,
-        mlp_dim,
-        dropout=0.0,
-        block_class=Block,
-    ):
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        depth: int,
+        heads: int,
+        dim_head: int,
+        mlp_dim: int,
+        dropout: float = 0.0,
+        block_class: type[Block] | type[ConditionalBlock] = Block,
+    ) -> None:
         super().__init__()
         self.norm = nn.LayerNorm(hidden_dim)
         self.layers = nn.ModuleList([])
@@ -261,7 +283,9 @@ class Transformer(nn.Module):
                 block_class(hidden_dim, heads, dim_head, mlp_dim, dropout)
             )
 
-    def forward(self, x, c=None):
+    def forward(
+        self, x: torch.Tensor, c: torch.Tensor | None = None
+    ) -> torch.Tensor:
 
         if hasattr(self, "input_proj"):
             x = self.input_proj(x)
@@ -293,11 +317,11 @@ class Embedder(nn.Module):
 
     def __init__(
         self,
-        input_dim=10,
-        smoothed_dim=10,
-        emb_dim=10,
-        mlp_scale=4,
-    ):
+        input_dim: int = 10,
+        smoothed_dim: int = 10,
+        emb_dim: int = 10,
+        mlp_scale: int = 4,
+    ) -> None:
         super().__init__()
         # kernel_size=1 over time == a per-timestep linear map. No mixing
         # across timesteps happens here.
@@ -308,7 +332,7 @@ class Embedder(nn.Module):
             nn.Linear(mlp_scale * emb_dim, emb_dim),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (B, T, D)
         """
@@ -328,24 +352,24 @@ class MLP(nn.Module):
 
     def __init__(
         self,
-        input_dim,
-        hidden_dim,
-        output_dim=None,
-        norm_fn=nn.LayerNorm,
-        act_fn=nn.GELU,
-    ):
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int | None = None,
+        norm_fn: Callable[[int], nn.Module] | None = nn.LayerNorm,
+        act_fn: Callable[[], nn.Module] = nn.GELU,
+    ) -> None:
         super().__init__()
         # The config passes BatchNorm1d here, which needs a flat batch axis --
         # hence the (B*T, D) input convention.
-        norm_fn = norm_fn(hidden_dim) if norm_fn is not None else nn.Identity()
+        norm = norm_fn(hidden_dim) if norm_fn is not None else nn.Identity()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            norm_fn,
+            norm,
             act_fn(),
             nn.Linear(hidden_dim, output_dim or input_dim),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (B*T, D)
         """
@@ -367,17 +391,17 @@ class ARPredictor(nn.Module):
     def __init__(
         self,
         *,
-        num_frames,
-        depth,
-        heads,
-        mlp_dim,
-        input_dim,
-        hidden_dim,
-        output_dim=None,
-        dim_head=64,
-        dropout=0.0,
-        emb_dropout=0.0,
-    ):
+        num_frames: int,
+        depth: int,
+        heads: int,
+        mlp_dim: int,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int | None = None,
+        dim_head: int = 64,
+        dropout: float = 0.0,
+        emb_dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         # Learned position codes: attention is permutation-invariant without them.
         self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim))
@@ -394,7 +418,7 @@ class ARPredictor(nn.Module):
             block_class=ConditionalBlock,   # conditioned on the action
         )
 
-    def forward(self, x, c):
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
         """
         x: (B, T, d)
         c: (B, T, act_dim)
