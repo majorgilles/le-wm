@@ -17,8 +17,6 @@ dependencies = [
     "numpy",
     "scikit-learn",
     "wandb",
-    # ponytail: lancedb dropped Windows wheels in 0.39.0; unpin once upstream restores them
-    "lancedb<0.39.0",
     # stable-pretraining wants datasets>=2.20, but without naming it directly the
     # resolver backsolves to 1.1.1, which crashes on modern pyarrow.
     "datasets>=2.20.0",
@@ -27,11 +25,12 @@ dependencies = [
 [tool.uv]
 package = false
 
-# ponytail: box2d-py has no Windows wheel and needs SWIG to build. It arrives via
-# gymnasium[all] inside stable-worldmodel[env], but this repo only uses the PushT,
-# Reacher, Cube and TwoRoom environments, none of which are Box2D. Drop the override
-# if a Box2D env is ever added.
-override-dependencies = ["box2d-py; sys_platform != 'win32'"]
+# box2d-py 2.3.5 ships no wheel for Python 3.10 on any platform, so it would build
+# from source and needs the SWIG binary. It arrives via gymnasium[all] inside
+# stable-worldmodel[env], but this repo only uses the PushT, Reacher, Cube and
+# TwoRoom environments, none of which are Box2D. Drop this if a Box2D env is added.
+override-dependencies = ["box2d-py; sys_platform == 'never'"]
+
 
 # Without this, uv solves for every platform including Pyodide/emscripten and
 # backsolves datasets to 1.1.1, which breaks against modern pyarrow.
@@ -41,8 +40,8 @@ environments = [
     "sys_platform == 'darwin'",
 ]
 
-# CUDA build of PyTorch. torch 2.14.0 on Windows/py3.10 only ships a cu130 wheel,
-# which matches the local driver (CUDA 13.4). macOS has no CUDA, so it stays on PyPI.
+# CUDA build of PyTorch, matching the local driver (CUDA 13.4).
+# macOS has no CUDA, so it stays on the default PyPI wheels.
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
