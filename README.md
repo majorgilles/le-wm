@@ -31,9 +31,7 @@ This codebase builds on [stable-worldmodel](https://github.com/galilai-group/sta
 
 **Installation:**
 ```bash
-uv venv --python=3.10
-source .venv/bin/activate
-uv pip install stable-worldmodel[train,env]
+uv sync
 ```
 
 ## Data
@@ -65,7 +63,7 @@ wandb:
 
 To launch training:
 ```bash
-python train.py data=pusht
+uv run python train.py data=pusht
 ```
 
 Checkpoints are saved to `$STABLEWM_HOME` upon completion.
@@ -78,10 +76,10 @@ Evaluation configs live under `config/eval/`. Set the `policy` field to the chec
 
 ```bash
 # ✓ correct
-python eval.py --config-name=pusht.yaml policy=pusht/lewm
+uv run python eval.py --config-name=pusht.yaml policy=pusht/lewm
 
 # ✗ incorrect
-python eval.py --config-name=pusht.yaml policy=pusht/lewm_object.ckpt
+uv run python eval.py --config-name=pusht.yaml policy=pusht/lewm_object.ckpt
 ```
 
 ## Pretrained Checkpoints
@@ -145,7 +143,7 @@ that `eval.py` expects:
 hf download quentinll/lewm-pusht --local-dir $STABLEWM_HOME/hf_pusht
 
 # convert to object checkpoint under $STABLEWM_HOME/pusht/lewm_object.ckpt
-python - <<'PY'
+uv run python - <<'PY'
 import json, torch, stable_pretraining as spt
 from pathlib import Path
 from jepa import JEPA
